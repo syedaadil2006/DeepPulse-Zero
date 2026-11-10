@@ -1,0 +1,8 @@
+node_modules
+.next
+test-results
+playwright-report
+*.mp4
+!e2e/fixtures/*.mp4
+*.tsbuildinfo
+.claude/
