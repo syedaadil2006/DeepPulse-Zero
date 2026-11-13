@@ -51,7 +51,7 @@ Run the test suite (Node's built-in `node:test` runner, no extra install):
 npm test
 ```
 
-65 tests cover the photo metadata scanner and image preprocessing, the signal maths (FFT, POS, blood colour), the Breath Challenge statistics, the pulse engine (live pulse, injection attack timing, face-neck sync) and both API routes (input validation, live streaming, certificate issuing and forgery rejection), and the upload verdict rule.
+67 tests cover the photo metadata scanner and image preprocessing, the signal maths (FFT, POS, blood colour), the Breath Challenge statistics, the pulse engine (live pulse, injection attack timing, face-neck sync) and both API routes (input validation, live streaming, certificate issuing and forgery rejection, and that keys and alerts survive a restart), and the upload verdict rule.
 
 Browser tests (Playwright, ~5 min) drive the real app in your installed Chrome:
 
@@ -94,8 +94,8 @@ See [EVALUATION.md](EVALUATION.md). Upload mode, measured end to end in the app 
 - The passive pulse check catches frozen and injected feeds, but AI-generated video and face-swaps usually carry a pulse-like signal. The **live Breath Challenge** is the strong check.
 - A face-swap driven live by a person who also breathes along can pass the Breath Challenge.
 - Dim light, movement, heavy compression (meeting video) and darker skin in low light all weaken the signal; expect more **Inconclusive** results.
-- Certificates prove the challenge passed in a DeepPulse session at that time, not who took it. Without `DPZ_CERT_KEY` (a base64 PKCS#8 Ed25519 PEM) the signing key lives in memory and old certificates stop verifying when the server restarts.
-- The proctor relay is in-memory: one server process only (`npm run dev` / `npm start`), not serverless hosting.
+- Certificates prove the challenge passed in a DeepPulse session at that time, not who took it. Without `DPZ_CERT_KEY` (a base64 PKCS#8 Ed25519 PEM) the server creates a signing key once in `.data/cert-key.pem` (git-ignored), so certificates keep verifying after a restart. Back that file up; on Windows it is not locked to the owner. For production use a KMS or HSM.
+- The proctor relay runs in one server process (`npm run dev` / `npm start`), not serverless hosting. Verdicts (never video) are appended to `.data/alerts.jsonl` and the last 200 are replayed to a proctor who connects later, so the hash-chained log survives a restart.
 - Pulse data is biometric. Get consent before scanning anyone, especially in Meeting mode.
 
 ## Project layout

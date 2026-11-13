@@ -30,9 +30,12 @@ export default function ProctorPage() {
   const [connected, setConnected] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const chain = useRef<Promise<string>>(Promise.resolve(GENESIS));
+  const seen = useRef(new Set<string>()); // a reconnect replays saved history; chain each alert once
 
   // tamper-evident log: hash_n = SHA-256(hash_{n-1} || entry)
   const record = useCallback((a: AlertEvent) => {
+    if (seen.current.has(a.id)) return;
+    seen.current.add(a.id);
     chain.current = chain.current.then(async (prevHash) => {
       const hash = await sha256(prevHash + JSON.stringify(a));
       setLog((l) => [{ ...a, prevHash, hash }, ...l].slice(0, 200));

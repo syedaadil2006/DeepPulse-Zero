@@ -1,4 +1,7 @@
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AlertEvent, LivenessStatus, Telemetry } from "@/types";
+import { dataDir } from "../../../lib/certificate.ts"; // relative + .ts so node:test can import this route
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +10,39 @@ const g = globalThis as unknown as { __dpzClients?: Set<ReadableStreamDefaultCon
 const clients = (g.__dpzClients ??= new Set());
 const enc = new TextEncoder();
 
-const STATUSES: LivenessStatus[] = ["IDLE", "NO_FACE", "CALIBRATING", "VERIFIED_HUMAN", "DEEPFAKE_DETECTED"];
+// Verdicts (never telemetry or video) are kept in .data/alerts.jsonl so the proctor log survives a restart.
+const alertLog = () => join(dataDir(), "alerts.jsonl");
+const REPLAY = 200;
+
+function saveAlert(a: AlertEvent) {
+  try {
+    mkdirSync(dataDir(), { recursive: true });
+    appendFileSync(alertLog(), JSON.stringify(a) + "\n");
+  } catch (e) {
+    console.error("alert log write failed:", e); // the live relay still works without the file
+  }
+}
+
+/** Latest saved alerts, re-validated: the file is outside the request path but could still be edited. */
+function recentAlerts(): AlertEvent[] {
+  let text = "";
+  try {
+    text = readFileSync(alertLog(), "utf8");
+  } catch {
+    return [];
+  }
+  // shortcut: reads the whole file on each proctor connect; rotate it or move to a database past ~10k alerts
+  return text.split("\n").filter(Boolean).slice(-REPLAY).flatMap((line) => {
+    try {
+      const a = parseAlert(JSON.parse(line));
+      return a ? [a] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+const STATUSES: LivenessStatus[] =["IDLE", "NO_FACE", "CALIBRATING", "VERIFIED_HUMAN", "DEEPFAKE_DETECTED"];
 
 function parseAlert(b: unknown): AlertEvent | null {
   if (!b || typeof b !== "object") return null;
@@ -61,6 +96,7 @@ export async function POST(req: Request) {
   } else {
     const alert = parseAlert(body);
     if (!alert) return Response.json({ error: "invalid alert" }, { status: 400 });
+    saveAlert(alert);
     frame = enc.encode(`data: ${JSON.stringify(alert)}\n\n`);
   }
   for (const c of clients) {
@@ -80,7 +116,8 @@ export async function GET(req: Request) {
     start(c) {
       ctrl = c;
       clients.add(c);
-      c.enqueue(enc.encode(": connected\n\n"));
+      // history rides in the first chunk so the proctor rebuilds the same hash chain after a restart
+      c.enqueue(enc.encode(": connected\n\n" + recentAlerts().map((a) => `data: ${JSON.stringify(a)}\n\n`).join("")));
       ping = setInterval(() => {
         try {
           c.enqueue(enc.encode(": ping\n\n"));

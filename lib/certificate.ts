@@ -1,4 +1,9 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** Local state (signing key, alert log). Never committed: see .gitignore. */
+export const dataDir = () => process.env.DPZ_DATA_DIR ?? join(process.cwd(), ".data");
 
 /** What the browser reports about a passed Breath Challenge. */
 export interface CertClaims {
@@ -70,16 +75,30 @@ export function check(token: string, publicKey: KeyObject): Certificate | null {
 const g = globalThis as unknown as { __dpzKeys?: { privateKey: KeyObject; publicKey: KeyObject } };
 
 /**
- * shortcut: without DPZ_CERT_KEY (a base64 PKCS#8 Ed25519 PEM) the key lives in memory, so certificates stop
- * verifying when the server restarts; set the env var (or use a KMS) before relying on them.
+ * Signing key: DPZ_CERT_KEY (a base64 PKCS#8 Ed25519 PEM) if set, else a key created once in .data/cert-key.pem,
+ * so certificates keep verifying after a restart.
+ * shortcut: a key file on the server's disk; use a KMS or HSM before issuing certificates anyone relies on.
  */
 export function signingKeys() {
   if (!g.__dpzKeys) {
-    const pem = process.env.DPZ_CERT_KEY ? Buffer.from(process.env.DPZ_CERT_KEY, "base64").toString() : null;
-    if (pem) {
-      const privateKey = createPrivateKey(pem);
-      g.__dpzKeys = { privateKey, publicKey: createPublicKey(privateKey) };
-    } else g.__dpzKeys = generateKeyPairSync("ed25519");
+    const privateKey = createPrivateKey(process.env.DPZ_CERT_KEY ? Buffer.from(process.env.DPZ_CERT_KEY, "base64").toString() : localKeyPem());
+    g.__dpzKeys = { privateKey, publicKey: createPublicKey(privateKey) };
   }
   return g.__dpzKeys;
+}
+
+function localKeyPem(): string {
+  const file = join(dataDir(), "cert-key.pem");
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    const pem = generateKeyPairSync("ed25519").privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+    mkdirSync(dataDir(), { recursive: true });
+    try {
+      writeFileSync(file, pem, { mode: 0o600, flag: "wx" }); // owner-only; "wx" never overwrites an existing key
+      return pem;
+    } catch {
+      return readFileSync(file, "utf8"); // another request created it first
+    }
+  }
 }

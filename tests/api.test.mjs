@@ -1,9 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync } from "node:crypto";
+import { appendFileSync, mkdtempSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as socket from "../app/api/socket/route.ts";
 import * as certRoute from "../app/api/certificate/route.ts";
 import { check, issue, parseClaims, signingKeys } from "../lib/certificate.ts";
+
+process.env.DPZ_DATA_DIR = mkdtempSync(join(tmpdir(), "dpz-test-")); // keep the key and alert log out of the project
 
 const post = (url, body) =>
   new Request(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: typeof body === "string" ? body : JSON.stringify(body) });
@@ -62,6 +67,19 @@ describe("/api/socket (live relay)", () => {
     await reader.cancel();
   });
 
+  it("replays saved alerts to a proctor that connects later, skipping corrupt or edited lines", async () => {
+    await socket.POST(post("http://x/api/socket", { ...alert, id: "saved-1" }));
+    appendFileSync(join(process.env.DPZ_DATA_DIR, "alerts.jsonl"), "not json\n" + JSON.stringify({ ...alert, id: "x", status: "HACKED" }) + "\n");
+    const ctrl = new AbortController();
+    const reader = (await socket.GET(new Request("http://x/api/socket", { signal: ctrl.signal }))).body.getReader();
+    const first = new TextDecoder().decode((await reader.read()).value);
+    assert.match(first, /connected/);
+    assert.match(first, /"id":"saved-1"/);
+    assert.ok(!first.includes("HACKED") && !first.includes("not json"));
+    ctrl.abort();
+    await reader.cancel();
+  });
+
   it("only forwards whitelisted fields", async () => {
     const ctrl = new AbortController();
     const reader = (await socket.GET(new Request("http://x/api/socket", { signal: ctrl.signal }))).body.getReader();
@@ -75,6 +93,13 @@ describe("/api/socket (live relay)", () => {
 });
 
 describe("Proof-of-Pulse certificates", () => {
+  it("keeps the same signing key across a server restart, in an owner-only file", () => {
+    const before = signingKeys().publicKey.export({ type: "spki", format: "pem" });
+    delete globalThis.__dpzKeys; // what a restart does to the in-memory copy
+    assert.equal(signingKeys().publicKey.export({ type: "spki", format: "pem" }), before);
+    if (process.platform !== "win32") assert.equal(statSync(join(process.env.DPZ_DATA_DIR, "cert-key.pem")).mode & 0o077, 0);
+  });
+
   const passed = { session: "CAND-AB12", diff: 4.27, p: 0.004, beats: 46, cues: 8, startedAt: 1000, endedAt: 41000 };
 
   it("issues a certificate for a passed challenge that verifies", async () => {

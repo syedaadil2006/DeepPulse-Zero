@@ -6,3 +6,4 @@ playwright-report
 !e2e/fixtures/*.mp4
 *.tsbuildinfo
 .claude/
+.data/

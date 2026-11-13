@@ -157,3 +157,7 @@ None of the reported metrics reaches 90% at once: the honest best is 81.8% accur
 
 - Live webcam, Meeting mode and the Breath Challenge (the strongest check) were not part of this upload test.
 - Small sample, stock footage only, one face-swap. Larger sets (FaceForensics++, Celeb-DF, DFDC, the gated 914k-clip `belkhir-nacim/deepfake-videos`) need an access request.
+
+### Tried and rejected: face-cropped image check (Nov 2026)
+
+Scoring 16 face-cropped frames instead of 8 whole frames was run on the same 37 clips. Leave-one-out with re-tuned cut-offs gave **12/21 caught, 1/16 flagged**, the same as the shipped version, and its best in-sample fit was worse (Youden 0.60 vs 0.65). It costs twice the model calls for no gain, so it was not kept.
